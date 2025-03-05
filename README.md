@@ -24,15 +24,21 @@ The process involves:
 - Quality depends heavily on the ancillary data's accuracy
 - Temporal misalignment between different data sources can introduce error
 
-### Aggregate Bayesian Regression Model (ABRM)
+### Atom-based Regression Model (ABRM)
 
-`abrm_sim.R` and `nimble_abrm_0219.R` implement Bayesian approaches to spatial misalignment that account for the underlying spatial structure and uncertainty in the data.
+`abrm_sim.R` and `nimble_abrm_0219.R` implement a fully model-based approach to addressing spatial misalignment that does not rely on assumptions of spatial smoothness like other methods.
 
-Benefits of the Bayesian approach:
-- Properly accounts for uncertainty in the redistribution process
-- Can incorporate spatial correlation structures
-- Allows for the integration of multiple data sources
-- Provides full posterior distributions of estimates
+ABRM uses "atoms" (the areas created by intersecting all sets of units on which variables of interest are measured) as the units of analysis. This approach treats atom-level unmeasured values of covariates or outcomes as latent variables and builds models allowing them to be sampled conditional on observed values.
+
+Benefits of the ABRM approach:
+- Provides a fully model-based approach without requiring spatial alignment prior to analysis
+- Properly represents uncertainties arising from all analytic procedures
+- Enables more robust confounding adjustment through higher resolution analysis
+- Provides more realistic uncertainty estimates compared to deterministic reapportionment approaches
+- Does not rely on assumptions of smoothness in the underlying spatial risk surface
+- May significantly reduce bias in effect estimates (research shows it can reduce bias by up to 85% compared to dasymetric methods)
+
+Note: While ABRM has existed in statistical literature for over two decades, it has rarely been used in practice due to implementation challenges and computational demands. Our implementation in NIMBLE makes these methods more accessible.
 
 ## Scripts
 
