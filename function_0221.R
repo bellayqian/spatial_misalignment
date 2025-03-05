@@ -9,29 +9,15 @@ library(nimble)     # A package for performing MCMC in R
 library(ggplot2)
 library(coda)
 
-####
 # Simulation part
 gen_correlated_spat <- function(W, n_vars, rho = 0.6, var_spat = 1, correlation = 0.5, 
                                 global_ints = NULL, verify = FALSE) {
   n <- nrow(W)
   
-  # # BQ: Grid size adjustment
-  # base_grid_size <- res1[1] * res1[2]
-  # grid_factor <- sqrt(n/base_grid_size) # grid size scaling factor
-  # # BQ: First analyze spatial structure
-  # eigenvalues <- eigen(W)$values
-  # max_rho <- 1/max(abs(eigenvalues))
-  # # BQ: Adjust both rho and correlation
-  # spatial_factor <- (mean(rowSums(W)) / n) * grid_factor
-  # # BQ: Adjust rho to maintain valid spatial structure
-  # adjusted_rho <- sign(rho) * min(abs(rho), 0.99 * max_rho)
-  # # BQ: Adjust correlation to account for spatial effects
-  # adjusted_correlation <- correlation / (1 + spatial_factor * abs(adjusted_rho))
-  
   # Create precision matrix for variables (Lambda)
   Sigma_vars <- matrix(correlation, n_vars, n_vars) # Correlation Matrix 
   diag(Sigma_vars) <- 1
-  Lambda <- solve(Sigma_vars) #* (1/var_spat)
+  Lambda <- solve(Sigma_vars) 
   
   # Spatial precision matrix
   precision_matrix <- diag(colSums(W)) - rho * W
@@ -120,8 +106,6 @@ simulate_misaligned_data <- function(res1 = c(5, 5), res2 = c(10, 10),
   # Rename grids
   gridx <- grid2_final
   gridy <- sp_grid1_poly
-  
-  # 2-sim_misaligned_data.R
   gridy$ID <- 1:nrow(gridy)
   gridx$ID <- 1:nrow(gridx)
   

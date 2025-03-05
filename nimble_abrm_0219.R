@@ -16,7 +16,6 @@ abrm <- nimbleCode({
   beta_0_y ~ dnorm(3, sd = 1)  # Intercept for Y outcome
   
   for (j in 1:(p_x+p_y)){
-    #beta_y[j] ~ dnorm(0.5, sd = 1) # Effects of X' and Y covariates on Y
     beta_y[j] ~ dnorm(0, sd = 1) # Effects of X' and Y covariates on Y
   }
   

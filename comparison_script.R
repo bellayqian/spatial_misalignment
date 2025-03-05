@@ -1,6 +1,6 @@
 # Comparison of ABRM vs Dasymetric Mapping
 # This script compares the results of two different approaches:
-# 1. ABRM (Areal Binary Regression Model) from abrm_sim.R
+# 1. ABRM (Atom-based Regression Model) from abrm_sim.R
 # 2. Dasymetric mapping from Dasymetric_mapping.R
 
 library(ggplot2)
@@ -44,7 +44,7 @@ compare_methods <- function(
     beta_y = beta_y
   )
   
-  # # Create output directory for results
+  # Create output directory for results
   date_stamp <- format(Sys.Date(), "%Y%m%d")
   output_dir <- paste0("comparison_results_", date_stamp)
   dir.create(output_dir, showWarnings = FALSE)
@@ -257,7 +257,7 @@ create_sensitivity_summary_plots <- function(combined_results, output_dir) {
       mean_estimate = mean(estimated_beta),
       mean_lower = mean(ci_lower),
       mean_upper = mean(ci_upper),
-      true_value = mean(true_beta),  # This will be the same for all
+      true_value = mean(true_beta),  # This should be the same for all
       mean_bias = mean(bias),
       mean_rel_bias = mean(relative_bias),
       coverage_rate = mean(within_ci) * 100,
@@ -312,100 +312,7 @@ create_sensitivity_summary_plots <- function(combined_results, output_dir) {
   cat("Sensitivity summary plots saved to", file.path(output_dir, "sensitivity_summary_plots.pdf"), "\n")
 }
 
-# Function to run a parameter sensitivity analysis (optional)
-run_sensitivity_analysis_ <- function(
-    correlation_grid = c(0.2, 0.6),
-    n_sims = 3,
-    base_seed = 123
-) {
-  # Create output directory
-  date_stamp <- format(Sys.Date(), "%Y%m%d")
-  output_dir <- paste0("sensitivity_analysis_", date_stamp)
-  dir.create(output_dir, showWarnings = FALSE)
-  
-  # Initialize results storage
-  all_results <- list()
-  counter <- 1
-  
-  # Run through correlation grid
-  for(x_cor in correlation_grid) {
-    for(y_cor in correlation_grid) {
-      cat(sprintf("\nRunning simulations for x_cor = %.2f, y_cor = %.2f\n", x_cor, y_cor))
-      
-      for(sim in 1:n_sims) {
-        cat(sprintf("  Simulation %d of %d\n", sim, n_sims))
-        
-        # Set seed for reproducibility
-        sim_seed <- base_seed + counter
-        
-        # Run comparison
-        results <- compare_methods(
-          x_correlation = x_cor,
-          y_correlation = y_cor,
-          seed = sim_seed,
-          mcmc_params = list(
-            niter = 30000,
-            nburnin = 5000,
-            thin = 10,
-            nchains = 3
-          )
-        )
-        
-        # Store results
-        all_results[[counter]] <- results$combined_comparison
-        
-        # Increment counter
-        counter <- counter + 1
-      }
-    }
-  }
-  
-  # Combine all results
-  combined_results <- do.call(rbind, all_results)
-  
-  # Create summary plots across all simulations
-  create_sensitivity_summary_plots(combined_results, output_dir)
-  
-  # Save combined results
-  write.csv(combined_results, file = file.path(output_dir, "sensitivity_analysis_results.csv"), row.names = FALSE)
-  
-  # Aggregate results by correlation and method
-  summary_by_correlation <- combined_results %>%
-    mutate(
-      x_correlation = rep(rep(correlation_grid, each = length(correlation_grid) * n_sims * (length(unique(combined_results$variable)))), 2),
-      y_correlation = rep(rep(rep(correlation_grid, each = n_sims * (length(unique(combined_results$variable)))), length(correlation_grid)), 2)
-    ) %>%
-    group_by(method, x_correlation, y_correlation) %>%
-    summarize(
-      mean_abs_bias = mean(abs(bias)),
-      mean_rel_bias = mean(abs(relative_bias)),
-      rmse = sqrt(mean(bias^2)),
-      coverage_rate = mean(within_ci) * 100,
-      .groups = 'drop'
-    )
-  
-  # Save summary
-  write.csv(summary_by_correlation, file = file.path(output_dir, "sensitivity_summary.csv"), row.names = FALSE)
-  
-  # Create plot of method performance by correlation structure
-  ggplot(summary_by_correlation, aes(x = factor(x_correlation), y = factor(y_correlation), fill = rmse)) +
-    geom_tile() +
-    facet_wrap(~method) +
-    scale_fill_viridis_c(direction = -1) +
-    theme_minimal() +
-    labs(title = "Method Performance by Correlation Structure",
-         subtitle = "Root Mean Square Error (RMSE)",
-         x = "X Correlation",
-         y = "Y Correlation")
-  
-  ggsave(file.path(output_dir, "correlation_performance_heatmap.pdf"), width = 10, height = 8)
-  
-  cat("\nSensitivity analysis complete. Results saved to:", output_dir, "\n")
-  
-  return(summary_by_correlation)
-}
-
-# Function to run a parameter sensitivity analysis with improved simulation workflow
+# Function to run a parameter sensitivity analysis
 run_sensitivity_analysis <- function(
     correlation_grid = c(0.2, 0.6),
     n_sims = 3,
@@ -495,7 +402,6 @@ run_sensitivity_analysis <- function(
           sim_metadata = sim_metadata,
           niter = 30000,
           nburnin = 5000,
-          thin = 10,
           nchains = 3,
           save_plots = FALSE,
           output_dir = sim_dir

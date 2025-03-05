@@ -1,7 +1,7 @@
 
 source("function_0221.R")
 
-# Enhanced diagnostic function
+# Diagnostic function
 run_enhanced_diagnostics <- function(results) {
   mcmc.out <- results$mcmc_output
   sim_data <- results$sim_data
@@ -9,7 +9,7 @@ run_enhanced_diagnostics <- function(results) {
   # Extract true parameters
   true_params <- sim_data$true_params
   
-  # Function to calculate relative effective sample size
+  # Calculate relative effective sample size
   calc_rel_ess <- function(ess, n_iterations) {
     return(ess / n_iterations)
   }
@@ -38,7 +38,6 @@ run_enhanced_diagnostics <- function(results) {
     diagnostics_df$true_value >= mcmc.out$summary$all.chains[beta_params, "95%CI_low"] &
     diagnostics_df$true_value <= mcmc.out$summary$all.chains[beta_params, "95%CI_upp"]
   
-  # Print summary
   cat("\n=== MCMC Diagnostic Summary ===\n")
   cat("\nConvergence Criteria:\n")
   cat("- Good: Rhat < 1.1, rel_ess > 0.05\n")
@@ -51,15 +50,13 @@ run_enhanced_diagnostics <- function(results) {
   cat("\nOverall Assessment:\n")
   cat("Proportion of parameters with good convergence: ", 
       mean(diagnostics_df$rhat < 1.1 & diagnostics_df$rel_ess > 0.05), "\n")
-  
-  # Add coverage rate information
   cat("Coverage rate (% of parameters with true value in 95% CI): ", 
       mean(diagnostics_df$within_95ci) * 100, "%\n")
   
   return(diagnostics_df)
 }
 
-# Modified simulation function with improved parameters
+# Simulation function
 run_improved_simulation <- function(
     sim_number,
     x_cor, y_cor,
@@ -133,7 +130,7 @@ run_improved_simulation <- function(
   ))
 }
 
-# Function to run multiple simulations with different correlation strengths
+# Run multiple simulations with different correlation strengths
 run_correlation_study <- function(n_sims = 10,
                                   correlation_grid = c(0.2, 0.8),
                                   beta_x = c(0.03, -0.01, 0.06),
@@ -175,8 +172,7 @@ run_correlation_study <- function(n_sims = 10,
         
         # Store in list and run diagnostics
         results_list[[counter]] <- results
-        # diagnostics <- run_enhanced_diagnostics(results)
-        
+
         counter <- counter + 1
       }
     }
@@ -197,12 +193,12 @@ analyze_simulation_results <- function(results_list, output_prefix = NULL) {
   require(dplyr)
   require(tidyr)
   require(gridExtra)
-  require(reshape2) # For data reshaping
+  require(reshape2)
   
   # Get the output directory from the results list
   output_dir <- attr(results_list, "output_dir")
   if(is.null(output_dir)) {
-    output_dir <- "."  # Use current directory
+    output_dir <- "."
   }
   
   # If no output prefix provided, create one with timestamp
@@ -270,30 +266,6 @@ analyze_simulation_results <- function(results_list, output_prefix = NULL) {
       .groups = 'drop'
     )
   
-  # # Create correlation-specific files
-  # for(i in 1:nrow(correlation_summary)) {
-  #   xcor <- correlation_summary$x_correlation[i]
-  #   ycor <- correlation_summary$y_correlation[i]
-  #   
-  #   # Filter data for this correlation combination
-  #   combo_df <- results_df %>%
-  #     filter(x_correlation == xcor, y_correlation == ycor)
-  #   
-  #   # Create a filename for this correlation combo
-  #   combo_file <- file.path(output_dir, 
-  #                           sprintf("%s_xcor%.1f_ycor%.1f_summary.csv", 
-  #                                   output_prefix, xcor, ycor))
-  #   
-  #   # Save filtered results
-  #   write.csv(combo_df, combo_file, row.names = FALSE)
-  # }
-  # 
-  # # Create visualization of parameter distributions across simulations
-  # create_parameter_distribution_plots(results_df, parameter_summary, output_dir, output_prefix)
-  # 
-  # # Create correlation structure effect plots
-  # create_correlation_structure_plots(parameter_summary, correlation_summary, output_dir, output_prefix)
-  
   # Save overall summary statistics
   write.csv(parameter_summary, 
             file = file.path(output_dir, paste0(output_prefix, "_parameter_summary.csv")), 
@@ -303,7 +275,6 @@ analyze_simulation_results <- function(results_list, output_prefix = NULL) {
             file = file.path(output_dir, paste0(output_prefix, "_correlation_summary.csv")), 
             row.names = FALSE)
   
-  # Return results as a list
   return(list(
     parameter_summary = parameter_summary,
     correlation_summary = correlation_summary,
@@ -312,7 +283,7 @@ analyze_simulation_results <- function(results_list, output_prefix = NULL) {
   ))
 }
 
-# Function to analyze simulation results
+# Analyze simulation results
 analyze_simulation_results_simpler_parametric <- function(results_list, output_prefix = NULL) {
   require(ggplot2)
   require(dplyr)
@@ -354,9 +325,9 @@ analyze_simulation_results_simpler_parametric <- function(results_list, output_p
     group_by(x_correlation, y_correlation, parameter) %>%
     summarise(
       estimated_beta = mean(estimated_value),
-      se_beta = sd(estimated_value) / sqrt(n()),  # Standard error of the mean
+      se_beta = sd(estimated_value) / sqrt(n()),
       true_beta = first(true_value),
-      # Calculate CI using t-distribution (more conservative than normal for small sample sizes)
+      # Calculate CI using t-distribution
       ci_lower = estimated_beta - qt(0.975, n() - 1) * se_beta,
       ci_upper = estimated_beta + qt(0.975, n() - 1) * se_beta,
       .groups = 'drop'
@@ -368,7 +339,7 @@ analyze_simulation_results_simpler_parametric <- function(results_list, output_p
   # Get unique correlation combinations
   corr_combos <- unique(comparison_df[, c("x_correlation", "y_correlation")])
   
-  # Also create a combined plot showing all combinations in facets
+  # Create a combined plot showing all combinations in facets
   p_combined <- ggplot(comparison_df, aes(x = parameter)) +
     geom_point(aes(y = estimated_beta), color = "blue") +
     geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2, color = "blue") +
@@ -388,7 +359,7 @@ analyze_simulation_results_simpler_parametric <- function(results_list, output_p
   # Save all results
   # Create single PDF with all plots
   pdf(pdf_file, width = 12, height = 8)
-  print(p_combined)  # Combined comparison plot
+  print(p_combined)
   
   # Print MCMC diagnostics for each simulation
   for(i in seq_along(results_list)) {
