@@ -72,7 +72,8 @@ Each script is documented with comments explaining the required inputs and expec
 ## Citation
 
 If you use these methods in your research, please cite this repository and the relevant methodological papers.
+TBD
 
 ## Contact
 
-For questions or collaborations, please open an issue or contact the repository owner.
+For questions or collaborations, please open an issue or contact the repository owner. TBD
