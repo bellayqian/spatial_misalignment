@@ -1,0 +1,79 @@
+/* www/styles.css */
+.content-wrapper, .right-side {
+  background-color: #f9f9f9;
+}
+
+.box {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+  transition: all 0.3s cubic-bezier(.25,.8,.25,1);
+}
+
+.box:hover {
+  box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22);
+}
+
+.skin-blue .main-header .logo {
+  background-color: #3c8dbc;
+  color: #fff;
+  border-bottom: 0 solid transparent;
+  font-weight: bold;
+}
+
+.skin-blue .main-header .logo:hover {
+  background-color: #357ca5;
+}
+
+.loading-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin-top: -25px;
+  margin-left: -25px;
+  width: 50px;
+  height: 50px;
+  border: 5px solid #f3f3f3;
+  border-top: 5px solid #3498db;
+  border-radius: 50%;
+  animation: spinner 1s linear infinite;
+}
+
+@keyframes spinner {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.map-container {
+  position: relative;
+  min-height: 600px;
+}
+
+/* Custom styling for action buttons */
+.action-button {
+  transition: all 0.3s;
+}
+
+.action-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+}
+
+/* Styling for the 3D map container */
+#map_3d {
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+/* Improve tab styling */
+.nav-tabs-custom > .nav-tabs > li.active {
+  border-top-color: #3c8dbc;
+}
+
+/* Styling for sliders */
+.irs-bar {
+  background-color: #3c8dbc;
+  border-color: #3c8dbc;
+}
+
+.irs-from, .irs-to, .irs-single {
+  background-color: #3c8dbc;
+}
