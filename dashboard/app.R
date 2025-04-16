@@ -5,16 +5,26 @@ library(sf)
 library(ggplot2)
 library(DT)
 library(plotly)
-library(USAboundaries)
+library(leaflet)
+library(tigris)
 library(RColorBrewer)
 library(cowplot)
 library(shinyjs)
+library(dplyr)
+
+# Set tigris options to cache data and prevent duplicate downloads
+options(tigris_use_cache = TRUE)
 
 # Load helper functions
 source("R/map_functions.R")
 
 # Load data
-load("data/final_misaligned_data.RData")
+load("data/atom_county_data.RData")
+
+# Get state list only once for UI dropdown
+state_list <- states(cb = TRUE)
+state_list <- subset(state_list, !(STUSPS %in% c("AK", "HI", "PR", "AS", "VI")))
+state_choices <- c("All States" = "", sort(unique(state_list$STUSPS)))
 
 # UI Definition
 ui <- dashboardPage(
@@ -27,18 +37,17 @@ ui <- dashboardPage(
     width = 350,
     sidebarMenu(
       id = "sidebarMenu",
-      menuItem("Dashboard Home", tabName = "home", icon = icon("dashboard")),
       menuItem("Maps Explorer", tabName = "maps", icon = icon("map")),
       menuItem("Data Explorer", tabName = "data", icon = icon("table")),
       menuItem("Methods Comparison", tabName = "methods", icon = icon("chart-bar")),
       menuItem("About", tabName = "about", icon = icon("info-circle"))
     ),
     
-    # State selection dropdown - changed to selectizeInput for better search
+    # State selection dropdown
     selectizeInput(
       "state_filter",
       "Select a State (optional):",
-      choices = c("All States" = "", sort(unique(us_states()$stusps))),
+      choices = state_choices,
       selected = "",
       options = list(
         placeholder = 'Type to search...',
@@ -56,19 +65,6 @@ ui <- dashboardPage(
     conditionalPanel(
       condition = "input.state_filter != ''",
       uiOutput("county_selector")
-    ),
-    
-    # Add detail level slider for 3D maps
-    conditionalPanel(
-      condition = "input.sidebarMenu == 'home'",
-      sliderInput(
-        "detail_level",
-        "Map Detail Level:",
-        min = 0.001,
-        max = 0.1,
-        value = 0.01,
-        step = 0.001
-      )
     )
   ),
   
@@ -82,8 +78,8 @@ ui <- dashboardPage(
     useShinyjs(),
     
     tabItems(
-      # Dashboard Home tab
-      tabItem(tabName = "home",
+      # Maps Explorer tab (now the main tab)
+      tabItem(tabName = "maps",
               fluidRow(
                 box(
                   width = 12,
@@ -91,65 +87,20 @@ ui <- dashboardPage(
                   status = "primary",
                   solidHeader = TRUE,
                   p("This dashboard provides interactive visualizations of counties, congressional districts, and atoms for exploring spatial misalignment."),
-                  p("The analytic dataset contains 3,104 counties, 432 congressional districts, and 3,728 atoms.")
+                  uiOutput("dataset_summary")
                 )
               ),
-              fluidRow(
-                box(
-                  width = 12,
-                  title = "3D Visualization",
-                  status = "primary",
-                  radioButtons("map_type", "Select Map Type:",
-                               choices = list(
-                                 "3D County Boundaries" = "counties", 
-                                 "3D Congressional Districts" = "districts",
-                                 "3D Atom Counts" = "atoms"
-                               ),
-                               selected = "counties",
-                               inline = TRUE),
-                  div(
-                    class = "map-container",
-                    plotlyOutput("map_3d", height = "600px"),
-                    tags$div(id = "loading-spinner", class = "loading-spinner")
-                  ),
-                  p("Hover over different elements to view details. Use the buttons below to navigate to detailed views.")
-                )
-              ),
-              fluidRow(
-                column(width = 4,
-                       actionButton("view_counties", "View Counties", 
-                                    icon = icon("map"), 
-                                    class = "action-button",
-                                    style="color: #fff; background-color: #ff9800; border-color: #e68a00; width: 100%")
-                ),
-                column(width = 4,
-                       actionButton("view_districts", "View Congressional Districts", 
-                                    icon = icon("map-marker"), 
-                                    class = "action-button",
-                                    style="color: #fff; background-color: #2196F3; border-color: #0c7cd5; width: 100%")
-                ),
-                column(width = 4,
-                       actionButton("view_atoms", "View Atom Counts", 
-                                    icon = icon("cubes"), 
-                                    class = "action-button",
-                                    style="color: #fff; background-color: #4CAF50; border-color: #3d8b40; width: 100%")
-                )
-              )
-      ),
-      
-      # Maps Explorer tab
-      tabItem(tabName = "maps",
               fluidRow(
                 tabBox(
                   width = 12,
                   title = "Interactive Maps",
                   id = "mapTabBox",
                   tabPanel("County Boundaries", 
-                           plotlyOutput("county_map_interactive", height = "600px")),
+                           leafletOutput("county_map_leaflet", height = "600px")),
                   tabPanel("Congressional Districts", 
-                           plotlyOutput("cd_map_interactive", height = "600px")),
+                           leafletOutput("cd_map_leaflet", height = "600px")),
                   tabPanel("Atom Counts", 
-                           plotlyOutput("atom_map_interactive", height = "600px"))
+                           leafletOutput("atom_map_leaflet", height = "600px"))
                 )
               ),
               fluidRow(
@@ -185,8 +136,23 @@ ui <- dashboardPage(
                 box(
                   width = 12,
                   title = "Comparison: Dasymetric Mapping vs ABRM",
+                  status = "primary",
+                  solidHeader = TRUE,
                   p("This section compares traditional dasymetric mapping approaches with Atom-Based Regression Models."),
-                  p("Interactive comparisons will be available here.")
+                  p("Select a distribution type to view method comparison results.")
+                )
+              ),
+              fluidRow(
+                tabBox(
+                  width = 12,
+                  title = "Comparison Results",
+                  id = "methodsTabBox",
+                  tabPanel("Poisson Distribution - Count data", 
+                           plotOutput("poisson_forest_plot", height = "600px")),
+                  tabPanel("Binomial Distribution - Rate data", 
+                           p("Binomial distribution comparison results will be available soon.")),
+                  tabPanel("Normal Distribution - Continuous data", 
+                           p("Normal distribution comparison results will be available soon."))
                 )
               )
       ),
@@ -216,19 +182,29 @@ ui <- dashboardPage(
 
 # Server logic
 server <- function(input, output, session) {
-  
-  # Show/hide loading spinner
-  show_spinner <- function() {
-    shinyjs::show("loading-spinner")
-  }
-  
-  hide_spinner <- function() {
-    shinyjs::hide("loading-spinner")
-  }
-  
-  # Hide loading spinner initially
-  observe({
-    hide_spinner()
+  output$dataset_summary <- renderUI({
+    # Count the number of counties
+    county_count <- nrow(county)
+    
+    # Count the number of unique congressional districts
+    # This assumes there's a cd or cd_id column in your atom dataset
+    if ("cd" %in% names(atom)) {
+      cd_count <- length(unique(atom$cd))
+    } else if ("cd_id" %in% names(atom)) {
+      cd_count <- length(unique(atom$cd_id))
+    } else if ("cd_name" %in% names(atom)) {
+      cd_count <- length(unique(atom$cd_name))
+    } else {
+      cd_count <- "unknown"
+    }
+    
+    # Count the number of atoms
+    atom_count <- nrow(atom)
+    
+    p(paste0("The analytic dataset contains ", 
+             format(county_count, big.mark=","), " counties, ", 
+             format(cd_count, big.mark=","), " congressional districts, and ", 
+             format(atom_count, big.mark=","), " atoms."))
   })
   
   # Generate Congressional District dropdown based on selected state
@@ -239,17 +215,23 @@ server <- function(input, output, session) {
       return(NULL)
     }
     
-    cd_data <- us_congressional()
-    cd_data <- subset(cd_data, !(state_abbr %in% c('AK', 'HI', 'PR')))
+    # Get congressional districts using tigris
+    cd_data <- congressional_districts(cb = TRUE)
+    state_info <- filter(state_list, STUSPS == input$state_filter)
     
-    if (input$state_filter != "") {
-      cd_data <- subset(cd_data, state_abbr == input$state_filter)
+    if(nrow(state_info) > 0) {
+      state_fips <- state_info$STATEFP[1]
+      cd_data <- filter(cd_data, STATEFP == state_fips)
     }
+    
+    # Find the correct CD column
+    cd_col <- names(cd_data)[grep("CD\\d+FP", names(cd_data))]
+    if(length(cd_col) == 0) cd_col <- "CD"
     
     selectInput(
       "cd_filter",
       "Select a Congressional District:",
-      choices = c("All Districts" = "", sort(unique(cd_data$cd_name))),
+      choices = c("All Districts" = "", paste0("District ", sort(unique(cd_data[[cd_col]])))),
       selected = ""
     )
   })
@@ -262,48 +244,273 @@ server <- function(input, output, session) {
       return(NULL)
     }
     
-    county_data <- county
-    
-    # Check if state_abbr exists in county data
-    if ("state_abbr" %in% colnames(county_data)) {
-      county_data <- subset(county_data, state_abbr == input$state_filter)
-    }
-    
+    # Get counties for the selected state using tigris
+    county_state_data <- counties(state = input$state_filter, cb = TRUE)
+    print(head(county_state_data))
     selectInput(
       "county_filter",
       "Select a County:",
-      choices = c("All Counties" = "", sort(unique(county_data$name))),
+      choices = c("All Counties" = "", sort(unique(county_state_data$NAME))),
       selected = ""
     )
   })
   
-  # Interactive county map
-  output$county_map_interactive <- renderPlotly({
-    # Create a basic ggplot map first
+  # Leaflet map outputs
+  output$county_map_leaflet <- renderLeaflet({
     state_filter <- if(input$state_filter == "") NULL else input$state_filter
-    p <- generate_county_map(state_filter)
     
-    # Convert to plotly
-    ggplotly(p) %>%
-      layout(title = "County Boundaries")
+    # Load county data from tigris
+    if(is.null(state_filter)) {
+      county_data <- counties(cb = TRUE)
+      county_data <- subset(county_data, !(STATEFP %in% c("02", "15", "72", "60", "78")))
+    } else {
+      county_data <- counties(state = state_filter, cb = TRUE)
+    }
+    
+    # Get state boundaries
+    stbounds <- states(cb = TRUE)
+    stbounds <- subset(stbounds, !(STUSPS %in% c("AK", "HI", "PR", "AS", "VI")))
+    
+    if(!is.null(state_filter)) {
+      stbounds <- subset(stbounds, STUSPS == state_filter)
+    }
+    
+    # Create leaflet map
+    map <- leaflet() %>%
+      addProviderTiles(providers$CartoDB.Positron) %>%
+      addPolygons(
+        data = county_data,
+        fillColor = "white",
+        fillOpacity = 0.5,
+        color = "#FF8C00",
+        weight = 1,
+        opacity = 0.7,
+        highlightOptions = highlightOptions(
+          weight = 2,
+          color = "#FF4500",
+          fillOpacity = 0.7,
+          bringToFront = TRUE
+        ),
+        label = ~NAME,
+        popup = ~paste("<strong>County:</strong>", NAME)
+      ) %>%
+      addPolylines(
+        data = stbounds,
+        color = "black",
+        weight = 1.5,
+        opacity = 0.8,
+        label = ~NAME
+      )
+    
+    # Set view based on filter
+    if(is.null(state_filter)) {
+      map <- map %>% setView(-96, 38, zoom = 4)
+    } else {
+      state_bounds <- st_bbox(stbounds)
+      map <- map %>% fitBounds(
+        state_bounds[["xmin"]], state_bounds[["ymin"]],
+        state_bounds[["xmax"]], state_bounds[["ymax"]]
+      )
+    }
+    
+    return(map)
   })
   
-  # Interactive congressional district map
-  output$cd_map_interactive <- renderPlotly({
+  output$cd_map_leaflet <- renderLeaflet({
     state_filter <- if(input$state_filter == "") NULL else input$state_filter
-    p <- generate_cd_map(state_filter)
     
-    ggplotly(p) %>%
-      layout(title = "Congressional District Boundaries")
+    # Load congressional district data from tigris
+    if(is.null(state_filter)) {
+      cd_data <- congressional_districts(cb = TRUE)
+      cd_data <- subset(cd_data, !(STATEFP %in% c("02", "15", "72", "60", "78")))
+    } else {
+      cd_data <- congressional_districts(state = state_filter, cb = TRUE)
+    }
+
+    # Get state boundaries
+    stbounds <- states(cb = TRUE)
+    stbounds <- subset(stbounds, !(STUSPS %in% c("AK", "HI", "PR", "AS", "VI")))
+    
+    if(!is.null(state_filter)) {
+      stbounds <- subset(stbounds, STUSPS == state_filter)
+    }
+    
+    # Find the correct CD column
+    cd_col <- names(cd_data)[grep("CD\\d+FP", names(cd_data))]
+    if(length(cd_col) == 0) cd_col <- "CD" # Fallback if pattern not found
+    
+    # Create leaflet map
+    map <- leaflet() %>%
+      addProviderTiles(providers$CartoDB.Positron) %>%
+      addPolygons(
+        data = cd_data,
+        fillColor = "white",
+        fillOpacity = 0.5,
+        color = "#4169E1",
+        weight = 1,
+        opacity = 0.7,
+        highlightOptions = highlightOptions(
+          weight = 2,
+          color = "#0000FF",
+          fillOpacity = 0.7,
+          bringToFront = TRUE
+        ),
+        label = ~paste("District:", get(cd_col)),
+        popup = ~paste("<strong>Congressional District:</strong>", get(cd_col))
+      ) %>%
+      addPolylines(
+        data = stbounds,
+        color = "black",
+        weight = 1.5,
+        opacity = 0.8,
+        label = ~NAME
+      )
+    
+    # Set view based on filter
+    if(is.null(state_filter)) {
+      map <- map %>% setView(-96, 38, zoom = 4)
+    } else {
+      state_bounds <- st_bbox(stbounds)
+      map <- map %>% fitBounds(
+        state_bounds[["xmin"]], state_bounds[["ymin"]],
+        state_bounds[["xmax"]], state_bounds[["ymax"]]
+      )
+    }
+    
+    return(map)
   })
   
-  # Interactive atom count map
-  output$atom_map_interactive <- renderPlotly({
+  output$atom_map_leaflet <- renderLeaflet({
     state_filter <- if(input$state_filter == "") NULL else input$state_filter
-    p <- generate_atom_map(state_filter)
     
-    ggplotly(p) %>%
-      layout(title = "Number of Atoms per County")
+    # Load county data from tigris
+    if(is.null(state_filter)) {
+      county_data <- counties(cb = TRUE)
+      county_data <- subset(county_data, !(STATEFP %in% c("02", "15", "72", "60", "78", "66", "69", "74", "GU")))
+    } else {
+      county_data <- counties(state = state_filter, cb = TRUE)
+    }
+    
+    # Get state boundaries
+    stbounds <- states(cb = TRUE)
+    stbounds <- subset(stbounds, !(STUSPS %in% c("AK", "HI", "PR", "AS", "VI", "GU", "MP")))
+    
+    if(!is.null(state_filter)) {
+      stbounds <- subset(stbounds, STUSPS == state_filter)
+      
+      # Specific debug for Jackson County, Alabama
+      if(state_filter == "AL") {
+        morgan_county <- county_data %>% filter(NAME == "Jackson")
+        
+        # Check if Jackson County exists in tigris data
+        if(nrow(morgan_county) > 0) {
+          print("Jackson County GEOID in tigris:")
+          print(morgan_county$GEOID)
+          
+          # Check if this GEOID exists in your RData county file
+          morgan_in_county <- county %>% filter(geoid == morgan_county$GEOID[1])
+          print(paste("Jackson County in RData? Found:", nrow(morgan_in_county) > 0))
+          
+          if(nrow(morgan_in_county) > 0) {
+            print("Jackson County num_atoms in RData:")
+            print(morgan_in_county$num_atoms)
+          }
+        } else {
+          print("Jackson County not found in tigris data for Alabama")
+        }
+      }
+    }
+    
+    # Fix the CRS inconsistency warning
+    county_data <- st_transform(county_data, 4326)  # Transform to WGS84
+    stbounds <- st_transform(stbounds, 4326)  # Transform to WGS84
+    
+    # Join with atom data
+    # Prepare county data for joining
+    county_atoms <- st_drop_geometry(county) %>%
+      dplyr::select(geoid, num_atoms)
+    
+    # Debug - show distribution of atom counts before join
+    print("num_atoms distribution in RData:")
+    print(summary(county_atoms$num_atoms))
+    
+    # Join by GEOID
+    county_data$geoid <- county_data$GEOID
+    county_data <- left_join(county_data, county_atoms, by = "geoid")
+    
+    county_data$num_atoms[is.na(county_data$num_atoms)] <- 0
+
+    # Create color palette for atom counts
+    pal <- colorBin(
+      palette = "YlGnBu",
+      domain = c(0, max(county_data$num_atoms)),
+      bins = c(1, 2, 3, 6, 11, Inf),
+      na.color = "#FFFFFF"
+    )
+    
+    # Check for undefined or NA values after color palette creation
+    print("Any NA values in num_atoms after handling?")
+    print(any(is.na(county_data$num_atoms)))
+    
+    # Check for any potential JavaScript "undefined" issues (NaN, Inf, etc.)
+    print("Any infinite values in num_atoms?")
+    print(any(is.infinite(county_data$num_atoms)))
+    
+    print("Any NaN values in num_atoms?")
+    print(any(is.nan(county_data$num_atoms)))
+    
+    # Create leaflet map
+    map <- leaflet() %>%
+      addProviderTiles(providers$CartoDB.Positron) %>%
+      addPolygons(
+        data = county_data,
+        fillColor = ~pal(num_atoms),
+        fillOpacity = 0.7,
+        color = "#FF8C00",
+        weight = 0.5,
+        opacity = 0.7,
+        highlightOptions = highlightOptions(
+          weight = 2,
+          color = "#FF4500",
+          fillOpacity = 0.9,
+          bringToFront = TRUE
+        ),
+        # Use NAME.x or NAME based on what's available after the join
+        label = ~paste(NAME, ": ", ifelse(num_atoms == 0, "No atom data", as.character(num_atoms)), " atoms"),
+        popup = ~paste("<strong>County:</strong>", NAME, 
+                       "<br><strong>Number of Atoms:</strong>", 
+                       ifelse(num_atoms == 0, "No atom data", as.character(num_atoms)))
+      ) %>%
+      addPolylines(
+        data = stbounds,
+        color = "black",
+        weight = 1.5,
+        opacity = 0.8,
+        label = ~NAME
+      ) %>%
+      addLegend(
+        position = "bottomright",
+        pal = pal,
+        values = county_data$num_atoms,
+        title = "Number of Atoms",
+        opacity = 0.7,
+        labFormat = function(type, cuts, p) {
+          c("1", "2", "3-5", "6-10", "10+")
+        }
+      )
+    
+    # Set view based on filter
+    if(is.null(state_filter)) {
+      map <- map %>% setView(-96, 38, zoom = 4)
+    } else {
+      state_bounds <- st_bbox(stbounds)
+      map <- map %>% fitBounds(
+        state_bounds[["xmin"]], state_bounds[["ymin"]],
+        state_bounds[["xmax"]], state_bounds[["ymax"]]
+      )
+    }
+    
+    return(map)
   })
   
   # Histogram of atom counts
@@ -314,6 +521,8 @@ server <- function(input, output, session) {
     if (input$state_filter != "") {
       if ("state_abbr" %in% colnames(filtered_county)) {
         filtered_county <- subset(filtered_county, state_abbr == input$state_filter)
+      } else if ("state" %in% colnames(filtered_county)) {
+        filtered_county <- subset(filtered_county, state == input$state_filter)
       }
     }
     
@@ -327,42 +536,6 @@ server <- function(input, output, session) {
       theme_minimal()
   })
   
-  # 3D map output - responds to the map type selector
-  output$map_3d <- renderPlotly({
-    show_spinner()
-    
-    state_filter <- if(input$state_filter == "") NULL else input$state_filter
-    detail_level <- input$detail_level
-    
-    # Select the appropriate 3D map based on radio button selection
-    plot <- if(input$map_type == "counties") {
-      generate_3d_county_map(state_filter, detail_level)
-    } else if(input$map_type == "districts") {
-      generate_3d_cd_map(state_filter, detail_level)
-    } else {
-      generate_3d_atom_map(state_filter, detail_level)
-    }
-    
-    hide_spinner()
-    return(plot)
-  })
-  
-  # Add observers for the action buttons
-  observeEvent(input$view_counties, {
-    updateTabItems(session, "sidebarMenu", "maps")
-    updateTabsetPanel(session, "mapTabBox", selected = "County Boundaries")
-  })
-  
-  observeEvent(input$view_districts, {
-    updateTabItems(session, "sidebarMenu", "maps")
-    updateTabsetPanel(session, "mapTabBox", selected = "Congressional Districts")
-  })
-  
-  observeEvent(input$view_atoms, {
-    updateTabItems(session, "sidebarMenu", "maps")
-    updateTabsetPanel(session, "mapTabBox", selected = "Atom Counts")
-  })
-  
   # County data table
   output$county_table <- DT::renderDataTable({
     filtered_county <- county
@@ -371,12 +544,15 @@ server <- function(input, output, session) {
     if (input$state_filter != "") {
       if ("state_abbr" %in% colnames(filtered_county)) {
         filtered_county <- subset(filtered_county, state_abbr == input$state_filter)
+      } else if ("state" %in% colnames(filtered_county)) {
+        filtered_county <- subset(filtered_county, state == input$state_filter)
       }
     }
     
     # Apply county filter if selected
     if (!is.null(input$county_filter) && input$county_filter != "") {
-      filtered_county <- subset(filtered_county, name == input$county_filter)
+      name_col <- if("name" %in% colnames(filtered_county)) "name" else "NAME"
+      filtered_county <- subset(filtered_county, get(name_col) == input$county_filter)
     }
     
     # Convert sf object to dataframe and select only non-geometry columns for display
@@ -400,17 +576,21 @@ server <- function(input, output, session) {
     if (input$state_filter != "") {
       if ("state_abbr" %in% colnames(filtered_atom)) {
         filtered_atom <- subset(filtered_atom, state_abbr == input$state_filter)
+      } else if ("state" %in% colnames(filtered_atom)) {
+        filtered_atom <- subset(filtered_atom, state == input$state_filter)
       }
     }
     
     # Apply county filter if selected
     if (!is.null(input$county_filter) && input$county_filter != "") {
-      filtered_atom <- subset(filtered_atom, county == input$county_filter)
+      county_col <- if("county" %in% colnames(filtered_atom)) "county" else "county_name"
+      filtered_atom <- subset(filtered_atom, get(county_col) == input$county_filter)
     }
     
     # Apply CD filter if selected
     if (!is.null(input$cd_filter) && input$cd_filter != "") {
-      filtered_atom <- subset(filtered_atom, cd_name == input$cd_filter)
+      cd_col <- if("cd_name" %in% colnames(filtered_atom)) "cd_name" else "cd"
+      filtered_atom <- subset(filtered_atom, get(cd_col) == input$cd_filter)
     }
     
     # Convert sf object to dataframe and select only non-geometry columns for display
@@ -424,6 +604,12 @@ server <- function(input, output, session) {
       ),
       rownames = FALSE
     )
+  })
+  
+  # Forest plot for Poisson distribution comparison
+  poisson_data <- read.csv("data/sensitivity_analysis_results.csv")
+  output$poisson_forest_plot <- renderPlot({
+    create_forest_plot(poisson_data, 0.2, 0.6)
   })
 }
 

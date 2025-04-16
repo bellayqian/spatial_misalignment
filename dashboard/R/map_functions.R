@@ -1,24 +1,250 @@
 # R/map_functions.R
 library(sf)
 library(ggplot2)
-library(USAboundaries)
 library(RColorBrewer)
 library(plotly)
+library(leaflet)
+library(tigris)
+library(dplyr)
 
-# Function to generate county boundaries map
-generate_county_map <- function(state_filter = NULL) {
-  stbounds <- USAboundaries::us_states()
-  stbounds <- subset(stbounds, !(stusps %in% c("AK", "HI", "PR")))
+# Set tigris options to cache data downloads
+options(tigris_use_cache = TRUE)
+
+# Function to load geographical data with caching
+load_geo_data <- function(state_filter = NULL) {
+  # Get state boundaries using tigris
+  stbounds <- states(cb = TRUE)
+  stbounds <- subset(stbounds, !(STUSPS %in% c("AK", "HI", "PR", "AS", "VI")))
+  
+  # Get county boundaries using tigris
+  county_data <- counties(cb = TRUE)
+  county_data <- subset(county_data, !(STATEFP %in% c("02", "15", "72", "60", "78"))) 
+  # Exclude AK, HI, PR, American Samoa, Virgin Islands
+  
+  # Get congressional district boundaries using tigris
+  cd <- congressional_districts(cb = TRUE)
+  cd <- subset(cd, !(STATEFP %in% c("02", "15", "72", "60", "78")))
   
   # Filter by state if specified
-  if (!is.null(state_filter)) {
-    county <- subset(county, state_abbr == state_filter)
+  if (!is.null(state_filter) && state_filter != "") {
+    # Get the state FIPS code from the abbreviation
+    state_info <- filter(stbounds, STUSPS == state_filter)
+    if(nrow(state_info) > 0) {
+      state_fips <- state_info$STATEFP[1]
+      
+      # Filter county and CD data
+      county_data <- filter(county_data, STATEFP == state_fips)
+      cd <- filter(cd, STATEFP == state_fips)
+      stbounds <- filter(stbounds, STUSPS == state_filter)
+    }
   }
+  
+  return(list(
+    states = stbounds,
+    counties = county_data,
+    congressional_districts = cd
+  ))
+}
+
+# Function to generate county boundaries map with leaflet
+generate_county_leaflet <- function(state_filter = NULL, county_data = NULL, stbounds = NULL) {
+  # If data not provided, load it
+  if(is.null(county_data) || is.null(stbounds)) {
+    geo_data <- load_geo_data(state_filter)
+    county_data <- geo_data$counties
+    stbounds <- geo_data$states
+  }
+  
+  # Create a leaflet map
+  map <- leaflet() %>%
+    # Add base map tiles
+    addProviderTiles(providers$CartoDB.Positron) %>%
+    # Add county boundaries
+    addPolygons(
+      data = county_data,
+      fillColor = "white",
+      fillOpacity = 0.5,
+      color = "#FF8C00",
+      weight = 1,
+      opacity = 0.7,
+      highlightOptions = highlightOptions(
+        weight = 2,
+        color = "#FF4500",
+        fillOpacity = 0.7,
+        bringToFront = TRUE
+      ),
+      label = ~NAME,
+      popup = ~paste("<strong>County:</strong>", NAME, 
+                     "<br><strong>State:</strong>", STUSPS)
+    ) %>%
+    # Add state boundaries
+    addPolylines(
+      data = stbounds,
+      color = "black",
+      weight = 1.5,
+      opacity = 0.8,
+      label = ~NAME
+    )
+  
+  # Set view to continental US if no state filter
+  if(is.null(state_filter) || state_filter == "") {
+    map <- map %>% setView(-96, 38, zoom = 4)
+  } else {
+    # If state filter is provided, zoom to that state
+    state_bounds <- st_bbox(stbounds)
+    map <- map %>% fitBounds(
+      state_bounds[["xmin"]], state_bounds[["ymin"]],
+      state_bounds[["xmax"]], state_bounds[["ymax"]]
+    )
+  }
+  
+  return(map)
+}
+
+# Function to generate congressional district boundaries map with leaflet
+generate_cd_leaflet <- function(state_filter = NULL, cd = NULL, stbounds = NULL) {
+  # If data not provided, load it
+  if(is.null(cd) || is.null(stbounds)) {
+    geo_data <- load_geo_data(state_filter)
+    cd <- geo_data$congressional_districts
+    stbounds <- geo_data$states
+  }
+  
+  # Create a leaflet map
+  map <- leaflet() %>%
+    # Add base map tiles
+    addProviderTiles(providers$CartoDB.Positron) %>%
+    # Add congressional district boundaries
+    addPolygons(
+      data = cd,
+      fillColor = "white",
+      fillOpacity = 0.5,
+      color = "#4169E1",
+      weight = 1,
+      opacity = 0.7,
+      highlightOptions = highlightOptions(
+        weight = 2,
+        color = "#0000FF",
+        fillOpacity = 0.7,
+        bringToFront = TRUE
+      ),
+      label = ~paste("District:", CD),
+      popup = ~paste("<strong>Congressional District:</strong>", CD, 
+                     "<br><strong>State:</strong>", STUSPS)
+    ) %>%
+    # Add state boundaries
+    addPolylines(
+      data = stbounds,
+      color = "black",
+      weight = 1.5,
+      opacity = 0.8,
+      label = ~NAME
+    )
+  
+  # Set view to continental US if no state filter
+  if(is.null(state_filter) || state_filter == "") {
+    map <- map %>% setView(-96, 38, zoom = 4)
+  } else {
+    # If state filter is provided, zoom to that state
+    state_bounds <- st_bbox(stbounds)
+    map <- map %>% fitBounds(
+      state_bounds[["xmin"]], state_bounds[["ymin"]],
+      state_bounds[["xmax"]], state_bounds[["ymax"]]
+    )
+  }
+  
+  return(map)
+}
+
+# Function to generate atom count choropleth map with leaflet
+generate_atom_leaflet <- function(state_filter = NULL, county_data = NULL, stbounds = NULL) {
+  # If data not provided, load it
+  if(is.null(county_data) || is.null(stbounds)) {
+    geo_data <- load_geo_data(state_filter)
+    county_data <- geo_data$counties
+    stbounds <- geo_data$states
+  }
+  
+  # Ensure atom data is joined to county data
+  # We assumes county_data has a 'num_atoms' field from the loaded RData
+
+  # Create a color palette for the atom counts
+  pal <- colorBin(
+    palette = "YlGnBu",
+    domain = county_data$num_atoms,
+    bins = c(0, 1, 2, 5, 10, 20, Inf),
+    na.color = "#FFFFFF"
+  )
+  
+  # Create a leaflet map
+  map <- leaflet() %>%
+    # Add base map tiles
+    addProviderTiles(providers$CartoDB.Positron) %>%
+    # Add county polygons colored by number of atoms
+    addPolygons(
+      data = county_data,
+      fillColor = ~pal(num_atoms),
+      fillOpacity = 0.7,
+      color = "#FF8C00",
+      weight = 0.5,
+      opacity = 0.7,
+      highlightOptions = highlightOptions(
+        weight = 2,
+        color = "#FF4500",
+        fillOpacity = 0.9,
+        bringToFront = TRUE
+      ),
+      label = ~paste(NAME, ": ", num_atoms, "atoms"),
+      popup = ~paste("<strong>County:</strong>", NAME, 
+                     "<br><strong>State:</strong>", STUSPS,
+                     "<br><strong>Number of Atoms:</strong>", num_atoms)
+    ) %>%
+    # Add state boundaries
+    addPolylines(
+      data = stbounds,
+      color = "black",
+      weight = 1.5,
+      opacity = 0.8,
+      label = ~NAME
+    ) %>%
+    # Add a legend
+    addLegend(
+      position = "bottomright",
+      pal = pal,
+      values = county_data$num_atoms,
+      title = "Number of Atoms",
+      opacity = 0.7,
+      labFormat = function(type, cuts, p) {
+        paste0(c("1", "2", "3-5", "6-10", "10+"))
+      }
+    )
+  
+  # Set view to continental US if no state filter
+  if(is.null(state_filter) || state_filter == "") {
+    map <- map %>% setView(-96, 38, zoom = 4)
+  } else {
+    # If state filter is provided, zoom to that state
+    state_bounds <- st_bbox(stbounds)
+    map <- map %>% fitBounds(
+      state_bounds[["xmin"]], state_bounds[["ymin"]],
+      state_bounds[["xmax"]], state_bounds[["ymax"]]
+    )
+  }
+  
+  return(map)
+}
+
+# Function to generate county boundaries map using ggplot (for backward compatibility)
+generate_county_map <- function(state_filter = NULL) {
+  # Load data
+  geo_data <- load_geo_data(state_filter)
+  stbounds <- geo_data$states
+  county_data <- geo_data$counties
   
   aa <- brewer.pal(n = 8, name = "Dark2")
   
   countybds <- ggplot() +
-    geom_sf(data = county, fill = 'white', lwd = .2, color = aa[2]) +
+    geom_sf(data = county_data, fill = 'white', lwd = .2, color = aa[2]) +
     geom_sf(data = stbounds, lwd = .2, color = 'black', fill = NA) +
     theme_void() +
     labs(title = "Continental US County Boundaries")
@@ -26,18 +252,12 @@ generate_county_map <- function(state_filter = NULL) {
   return(countybds)
 }
 
-# Function to generate congressional district boundaries map
+# Function to generate congressional district boundaries map using ggplot (for backward compatibility)
 generate_cd_map <- function(state_filter = NULL) {
-  stbounds <- USAboundaries::us_states()
-  stbounds <- subset(stbounds, !(stusps %in% c("AK", "HI", "PR")))
-  
-  cd <- us_congressional()
-  cd <- subset(cd, !(state_abbr %in% c('AK', 'HI', 'PR')))
-  
-  # Filter by state if specified
-  if (!is.null(state_filter)) {
-    cd <- subset(cd, state_abbr == state_filter)
-  }
+  # Load data
+  geo_data <- load_geo_data(state_filter)
+  stbounds <- geo_data$states
+  cd <- geo_data$congressional_districts
   
   aa <- brewer.pal(n = 8, name = "Dark2")
   
@@ -45,30 +265,37 @@ generate_cd_map <- function(state_filter = NULL) {
     geom_sf(data = cd, fill = 'white', lwd = .2, color = aa[3]) +
     geom_sf(data = stbounds, lwd = .2, color = 'black', fill = NA) +
     theme_void() +
-    labs(title = "2010 Congressional District Boundaries")
+    labs(title = "Congressional District Boundaries")
   
   return(cdbds)
 }
 
-# Function to generate atom count map
-generate_atom_map <- function(state_filter = NULL) {
-  stbounds <- USAboundaries::us_states()
-  stbounds <- subset(stbounds, !(stusps %in% c("AK", "HI", "PR")))
-  
-  # Create a copy of county data for this function
-  county_data <- county
-  
-  # Filter by state if specified
-  if (!is.null(state_filter)) {
-    county_data <- subset(county_data, state_abbr == state_filter)
+# Function to generate atom count map using ggplot (for backward compatibility)
+generate_atom_map <- function(state_filter = NULL, county_data = NULL) {
+  # Load data if not provided
+  if(is.null(county_data)) {
+    geo_data <- load_geo_data(state_filter)
+    stbounds <- geo_data$states
+    county_data <- geo_data$counties
+  } else {
+    # Get state boundaries using tigris
+    stbounds <- states(cb = TRUE)
+    stbounds <- subset(stbounds, !(STUSPS %in% c("AK", "HI", "PR")))
+    
+    if (!is.null(state_filter) && state_filter != "") {
+      stbounds <- filter(stbounds, STUSPS == state_filter)
+    }
   }
   
-  # Create the category variable
-  county_data$num_atoms_cat <- cut(
-    county_data$num_atoms,
-    breaks = c(0, 1.5, 2.5, 5.5, 10.5, 20),
-    labels = c('1', '2', '3-5', '6-10', '10+')
-  )
+  # Ensure county_data has num_atoms field
+  # Create the category variable if it doesn't exist
+  if(!"num_atoms_cat" %in% names(county_data)) {
+    county_data$num_atoms_cat <- cut(
+      county_data$num_atoms,
+      breaks = c(0, 1.5, 2.5, 5.5, 10.5, 20),
+      labels = c('1', '2', '3-5', '6-10', '10+')
+    )
+  }
   
   aa <- brewer.pal(n = 8, name = "Dark2")
   
@@ -85,303 +312,42 @@ generate_atom_map <- function(state_filter = NULL) {
   return(numat_fill)
 }
 
-# Improved fortify function for sf objects
-fortify <- function(sf_obj) {
-  if (nrow(sf_obj) == 0) {
-    return(data.frame(long = numeric(0), lat = numeric(0), id = character(0)))
-  }
-  
-  # Create a unique identifier if not present
-  if (!"plot_id" %in% names(sf_obj)) {
-    sf_obj$plot_id <- 1:nrow(sf_obj)
-  }
-  
-  # Extract coordinates
-  coords <- st_coordinates(sf_obj)
-  
-  # Handle multipolygons correctly
-  if ("L2" %in% colnames(coords)) {
-    # For multipolygons
-    df <- data.frame(
-      long = coords[, "X"],
-      lat = coords[, "Y"],
-      id = coords[, "L1"],  # Feature ID
-      piece = coords[, "L2"],  # Polygon part
-      group = paste(coords[, "L1"], coords[, "L2"], sep = ".")
-    )
-  } else {
-    # For simple polygons
-    df <- data.frame(
-      long = coords[, "X"],
-      lat = coords[, "Y"],
-      id = coords[, "L1"],  # Feature ID
-      group = coords[, "L1"]
-    )
-  }
-  
-  # Now we need to correctly join the attribute data
-  # First get the attribute data without geometry
-  attr_data <- st_drop_geometry(sf_obj)
-  
-  # Create a mapping from the original feature ID to the row in attr_data
-  id_map <- data.frame(
-    id = 1:nrow(sf_obj),
-    row_id = 1:nrow(sf_obj)
-  )
-  
-  # Merge the attribute data using this mapping
-  # We use merge with id_map first to get the right row
-  df_with_attrs <- merge(df, id_map, by = "id", all.x = TRUE)
-  
-  # Now we can safely merge with the attribute data
-  result <- cbind(df_with_attrs, attr_data[df_with_attrs$row_id, , drop = FALSE])
-  result$row_id <- NULL  # Remove the temporary mapping column
-  
-  return(result)
-}
-
-# Updated generate_3d_interactive_map function
-generate_3d_interactive_map_ <- function(state_filter = NULL, detail_level = 0.01) {
-  # Get state boundaries
-  stbounds <- USAboundaries::us_states()
-  stbounds <- subset(stbounds, !(stusps %in% c("AK", "HI", "PR")))
-  
-  # Get county and congressional district data
-  county_data <- county
-  cd <- us_congressional()
-  cd <- subset(cd, !(state_abbr %in% c('AK', 'HI', 'PR')))
-  
-  # Filter by state if specified
-  if (!is.null(state_filter) && state_filter != "") {
-    # Check if the column exists before filtering
-    if ("state_abbr" %in% colnames(county_data)) {
-      county_data <- subset(county_data, state_abbr == state_filter)
-    } else if ("state_name" %in% colnames(county_data)) {
-      # Try with state_name if state_abbr is not available
-      county_data <- subset(county_data, state_name == state_filter)
-    }
-    
-    if ("state_abbr" %in% colnames(cd)) {
-      cd <- subset(cd, state_abbr == state_filter)
-    }
-    
-    stbounds <- subset(stbounds, stusps == state_filter)
-  }
-  
-  # Check if we have data to display
-  if (nrow(county_data) == 0 || nrow(cd) == 0) {
-    # Return empty plot with message
-    return(plot_ly() %>% 
-             layout(title = "No data available for selected state",
-                    annotations = list(
-                      x = 0.5,
-                      y = 0.5,
-                      text = "Please select a different state or 'All States'",
-                      showarrow = FALSE
-                    )))
-  }
-  
-  # Simplify geometries for better performance
-  states_sf <- st_simplify(stbounds, dTolerance = detail_level)
-  county_sf <- st_simplify(county_data, dTolerance = detail_level)
-  cd_sf <- st_simplify(cd, dTolerance = detail_level)
-  
-  # Add height attributes before fortifying
-  states_sf$height <- 0
-  county_sf$height <- 0.1
-  cd_sf$height <- 0.2
-  
-  # Convert to data frames for plotly using our improved fortify function
-  states_df <- fortify(states_sf)
-  counties_df <- fortify(county_sf)
-  cds_df <- fortify(cd_sf)
-  
-  # Create 3D interactive plot
-  p <- plot_ly(source = "map_3d") %>%
-    # Add state boundaries as base layer
-    add_trace(
-      data = states_df,
-      x = ~long, y = ~lat, z = ~height,
-      type = "scatter3d",
-      mode = "lines",
-      line = list(color = "black", width = 2),
-      name = "State Boundaries",
-      hoverinfo = "name"
-    ) %>%
-    # Add county layer
-    add_trace(
-      data = counties_df,
-      x = ~long, y = ~lat, z = ~height,
-      type = "scatter3d",
-      mode = "lines",
-      line = list(color = "orange", width = 1.5),
-      name = "County Boundaries",
-      hoverinfo = "text",
-      hovertext = ~paste("County ID:", id, "<br>Atoms:", num_atoms)
-    ) %>%
-    # Add congressional district layer
-    add_trace(
-      data = cds_df,
-      x = ~long, y = ~lat, z = ~height,
-      type = "scatter3d",
-      mode = "lines",
-      line = list(color = "blue", width = 1.5),
-      name = "Congressional Districts",
-      hoverinfo = "text",
-      hovertext = ~paste("District ID:", id)
-    ) %>%
-    layout(
-      title = "3D Map of Counties and Congressional Districts",
-      scene = list(
-        aspectmode = "data",
-        xaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
-        yaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
-        zaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE, range = c(0, 0.3))
-      )
-    )
-  
-  return(p)
-}
-
-# Updated generate_3d_chloropleth function
-generate_3d_chloropleth_ <- function(state_filter = NULL, detail_level = 0.01) {
-  # Get state boundaries
-  stbounds <- USAboundaries::us_states()
-  stbounds <- subset(stbounds, !(stusps %in% c("AK", "HI", "PR")))
-  
-  # Get county data
-  county_data <- county
-  
-  # Filter by state if specified
-  if (!is.null(state_filter) && state_filter != "") {
-    # Check if the column exists before filtering
-    if ("state_abbr" %in% colnames(county_data)) {
-      county_data <- subset(county_data, state_abbr == state_filter)
-    } else if ("state_name" %in% colnames(county_data)) {
-      # Try with state_name if state_abbr is not available
-      county_data <- subset(county_data, state_name == state_filter)
-    }
-    
-    stbounds <- subset(stbounds, stusps == state_filter)
-  }
-  
-  # Check if we have data to display
-  if (nrow(county_data) == 0) {
-    # Return empty plot with message
-    return(plot_ly() %>% 
-             layout(title = "No data available for selected state",
-                    annotations = list(
-                      x = 0.5,
-                      y = 0.5,
-                      text = "Please select a different state or 'All States'",
-                      showarrow = FALSE
-                    )))
-  }
-  
-  # Simplify geometries for better performance
-  states_sf <- st_simplify(stbounds, dTolerance = detail_level)
-  county_sf <- st_simplify(county_data, dTolerance = detail_level)
-  
-  # Create categories for atom counts and add height
-  county_sf$num_atoms_cat <- cut(
-    county_sf$num_atoms,
-    breaks = c(0, 1.5, 2.5, 5.5, 10.5, 20),
-    labels = c('1', '2', '3-5', '6-10', '10+')
-  )
-  
-  # Create a numeric value for 3D height based on number of atoms
-  county_sf$height <- (county_sf$num_atoms / max(county_sf$num_atoms, na.rm = TRUE)) * 0.5
-  
-  # Set height for state boundaries
-  states_sf$height <- 0
-  
-  # Convert to data frames for plotly using our improved fortify function
-  states_df <- fortify(states_sf)
-  counties_df <- fortify(county_sf)
-  
-  # Create 3D chloropleth map
-  p <- plot_ly(source = "map_3d") %>%
-    # Add state boundaries as base layer
-    add_trace(
-      data = states_df,
-      x = ~long, y = ~lat, z = ~height,
-      type = "scatter3d",
-      mode = "lines",
-      line = list(color = "black", width = 2),
-      name = "State Boundaries",
-      hoverinfo = "name"
-    ) %>%
-    # Add counties with height based on atom count
-    add_trace(
-      data = counties_df,
-      x = ~long, y = ~lat, z = ~height,
-      type = "scatter3d",
-      mode = "lines",
-      line = list(color = ~num_atoms, colorscale = "YlGnBu", width = 2),
-      name = "Counties by Atom Count",
-      hoverinfo = "text",
-      hovertext = ~paste("County ID:", id, "<br>Atoms:", num_atoms)
-    ) %>%
-    layout(
-      title = "3D Chloropleth Map of Atom Counts by County",
-      scene = list(
-        aspectmode = "data",
-        xaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
-        yaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
-        zaxis = list(title = "Atom Count", showgrid = TRUE, zeroline = FALSE, range = c(0, 0.6))
-      )
-    )
-  
-  return(p)
-}
-
-# Simple 3D County Map function with fixed camera
+# Keep 3D visualization functions for backward compatibility
+# Can be updated depending on needs
 generate_3d_county_map <- function(state_filter = NULL, detail_level = 0.01) {
-  # Get state boundaries
-  stbounds <- USAboundaries::us_states()
-  stbounds <- subset(stbounds, !(stusps %in% c("AK", "HI", "PR")))
-  
-  # Get county data
-  county_data <- county
-  
-  # Filter by state if specified
-  if (!is.null(state_filter) && state_filter != "") {
-    if ("state_abbr" %in% colnames(county_data)) {
-      county_data <- subset(county_data, state_abbr == state_filter)
-    }
-    stbounds <- subset(stbounds, stusps == state_filter)
-  }
+  # Load data
+  geo_data <- load_geo_data(state_filter)
+  stbounds <- geo_data$states
+  county_data <- geo_data$counties
   
   # Simplify geometries for better performance
   county_data <- st_simplify(county_data, dTolerance = detail_level)
   stbounds <- st_simplify(stbounds, dTolerance = detail_level)
   
-  # Create a more direct 3D representation using plotly's geo capabilities
+  # Create a 3D representation using plotly
   fig <- plot_ly()
   
   # Add county polygons
-  for (i in 1:nrow(county_data)) {
+  for (i in 1:min(nrow(county_data), 500)) { # Limit to 500 counties for performance
     county_geom <- county_data[i,]
     coords <- st_coordinates(county_geom)[,1:2]
     
-    # Use number of atoms for coloring
-    atom_count <- county_data$num_atoms[i]
-    
-    fig <- fig %>% add_trace(
-      x = coords[,1], 
-      y = coords[,2],
-      z = rep(0.1, nrow(coords)),  # Fixed height for counties
-      type = "scatter3d",
-      mode = "lines",
-      line = list(
-        color = "orange",
-        width = 2
-      ),
-      hoverinfo = "text",
-      hovertext = paste("County:", county_data$name[i], 
-                        "<br>Atoms:", atom_count),
-      showlegend = FALSE
-    )
+    if(nrow(coords) > 0) {
+      fig <- fig %>% add_trace(
+        x = coords[,1], 
+        y = coords[,2],
+        z = rep(0.1, nrow(coords)),  # Fixed height for counties
+        type = "scatter3d",
+        mode = "lines",
+        line = list(
+          color = "orange",
+          width = 2
+        ),
+        hoverinfo = "text",
+        hovertext = paste("County:", county_data$NAME[i]),
+        showlegend = FALSE
+      )
+    }
   }
   
   # Add state boundaries for context
@@ -389,32 +355,34 @@ generate_3d_county_map <- function(state_filter = NULL, detail_level = 0.01) {
     state_geom <- stbounds[i,]
     coords <- st_coordinates(state_geom)[,1:2]
     
-    fig <- fig %>% add_trace(
-      x = coords[,1], 
-      y = coords[,2],
-      z = rep(0, nrow(coords)),  # Base level for states
-      type = "scatter3d",
-      mode = "lines",
-      line = list(
-        color = "black",
-        width = 2
-      ),
-      hoverinfo = "text",
-      hovertext = paste("State:", stbounds$name[i]),
-      showlegend = FALSE
-    )
+    if(nrow(coords) > 0) {
+      fig <- fig %>% add_trace(
+        x = coords[,1], 
+        y = coords[,2],
+        z = rep(0, nrow(coords)),  # Base level for states
+        type = "scatter3d",
+        mode = "lines",
+        line = list(
+          color = "black",
+          width = 2
+        ),
+        hoverinfo = "text",
+        hovertext = paste("State:", stbounds$NAME[i]),
+        showlegend = FALSE
+      )
+    }
   }
   
-  # Configure the 3D scene with fixed camera
+  # Configure the 3D scene
   fig <- fig %>% layout(
     title = "3D County Boundaries",
     scene = list(
       aspectmode = "data",
       camera = list(
-        eye = list(x = 0, y = -0.1, z = 2),  # Camera positioned above the map
+        eye = list(x = 0, y = -0.1, z = 2),
         center = list(x = 0, y = 0, z = 0)
       ),
-      dragmode = "pan",  # Allow panning but not rotation
+      dragmode = "pan",
       xaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
       yaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
       zaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE, range = c(0, 0.2))
@@ -424,50 +392,40 @@ generate_3d_county_map <- function(state_filter = NULL, detail_level = 0.01) {
   return(fig)
 }
 
-# Simple 3D Congressional District Map function with fixed camera
 generate_3d_cd_map <- function(state_filter = NULL, detail_level = 0.01) {
-  # Get state boundaries
-  stbounds <- USAboundaries::us_states()
-  stbounds <- subset(stbounds, !(stusps %in% c("AK", "HI", "PR")))
-  
-  # Get congressional district data
-  cd <- us_congressional()
-  cd <- subset(cd, !(state_abbr %in% c('AK', 'HI', 'PR')))
-  
-  # Filter by state if specified
-  if (!is.null(state_filter) && state_filter != "") {
-    if ("state_abbr" %in% colnames(cd)) {
-      cd <- subset(cd, state_abbr == state_filter)
-    }
-    stbounds <- subset(stbounds, stusps == state_filter)
-  }
+  # Load data
+  geo_data <- load_geo_data(state_filter)
+  stbounds <- geo_data$states
+  cd <- geo_data$congressional_districts
   
   # Simplify geometries for better performance
   cd <- st_simplify(cd, dTolerance = detail_level)
   stbounds <- st_simplify(stbounds, dTolerance = detail_level)
   
-  # Create a more direct 3D representation
+  # Create a 3D representation
   fig <- plot_ly()
   
   # Add congressional district polygons
-  for (i in 1:nrow(cd)) {
+  for (i in 1:min(nrow(cd), 500)) { # Limit to 500 districts for performance
     cd_geom <- cd[i,]
     coords <- st_coordinates(cd_geom)[,1:2]
     
-    fig <- fig %>% add_trace(
-      x = coords[,1], 
-      y = coords[,2],
-      z = rep(0.1, nrow(coords)),  # Fixed height for districts
-      type = "scatter3d",
-      mode = "lines",
-      line = list(
-        color = "blue",
-        width = 2
-      ),
-      hoverinfo = "text",
-      hovertext = paste("District:", cd$cd_name[i]),
-      showlegend = FALSE
-    )
+    if(nrow(coords) > 0) {
+      fig <- fig %>% add_trace(
+        x = coords[,1], 
+        y = coords[,2],
+        z = rep(0.1, nrow(coords)),  # Fixed height for districts
+        type = "scatter3d",
+        mode = "lines",
+        line = list(
+          color = "blue",
+          width = 2
+        ),
+        hoverinfo = "text",
+        hovertext = paste("District:", cd$CD[i]),
+        showlegend = FALSE
+      )
+    }
   }
   
   # Add state boundaries for context
@@ -475,32 +433,34 @@ generate_3d_cd_map <- function(state_filter = NULL, detail_level = 0.01) {
     state_geom <- stbounds[i,]
     coords <- st_coordinates(state_geom)[,1:2]
     
-    fig <- fig %>% add_trace(
-      x = coords[,1], 
-      y = coords[,2],
-      z = rep(0, nrow(coords)),  # Base level for states
-      type = "scatter3d",
-      mode = "lines",
-      line = list(
-        color = "black",
-        width = 2
-      ),
-      hoverinfo = "text",
-      hovertext = paste("State:", stbounds$name[i]),
-      showlegend = FALSE
-    )
+    if(nrow(coords) > 0) {
+      fig <- fig %>% add_trace(
+        x = coords[,1], 
+        y = coords[,2],
+        z = rep(0, nrow(coords)),  # Base level for states
+        type = "scatter3d",
+        mode = "lines",
+        line = list(
+          color = "black",
+          width = 2
+        ),
+        hoverinfo = "text",
+        hovertext = paste("State:", stbounds$NAME[i]),
+        showlegend = FALSE
+      )
+    }
   }
   
-  # Configure the 3D scene with fixed camera
+  # Configure the 3D scene
   fig <- fig %>% layout(
     title = "3D Congressional District Boundaries",
     scene = list(
       aspectmode = "data",
       camera = list(
-        eye = list(x = 0, y = -0.1, z = 2),  # Camera positioned above the map
+        eye = list(x = 0, y = -0.1, z = 2),
         center = list(x = 0, y = 0, z = 0)
       ),
-      dragmode = "pan",  # Allow panning but not rotation
+      dragmode = "pan",
       xaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
       yaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
       zaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE, range = c(0, 0.2))
@@ -510,22 +470,11 @@ generate_3d_cd_map <- function(state_filter = NULL, detail_level = 0.01) {
   return(fig)
 }
 
-# Function for 3D Atom Chloropleth with fixed camera
 generate_3d_atom_map <- function(state_filter = NULL, detail_level = 0.01) {
-  # Get state boundaries
-  stbounds <- USAboundaries::us_states()
-  stbounds <- subset(stbounds, !(stusps %in% c("AK", "HI", "PR")))
-  
-  # Get county data
-  county_data <- county
-  
-  # Filter by state if specified
-  if (!is.null(state_filter) && state_filter != "") {
-    if ("state_abbr" %in% colnames(county_data)) {
-      county_data <- subset(county_data, state_abbr == state_filter)
-    }
-    stbounds <- subset(stbounds, stusps == state_filter)
-  }
+  # Load data
+  geo_data <- load_geo_data(state_filter)
+  stbounds <- geo_data$states
+  county_data <- geo_data$counties
   
   # Simplify geometries for better performance
   county_data <- st_simplify(county_data, dTolerance = detail_level)
@@ -534,37 +483,41 @@ generate_3d_atom_map <- function(state_filter = NULL, detail_level = 0.01) {
   # Create a color palette for atom counts
   atom_colors <- colorRampPalette(brewer.pal(5, "YlGnBu"))(5)
   
-  # Create a more direct 3D representation
+  # Create a 3D representation
   fig <- plot_ly()
   
   # Add county polygons with height based on atom count
-  for (i in 1:nrow(county_data)) {
+  for (i in 1:min(nrow(county_data), 500)) { # Limit to 500 counties for performance
     county_geom <- county_data[i,]
     coords <- st_coordinates(county_geom)[,1:2]
     
-    # Calculate height based on atom count
-    atom_count <- county_data$num_atoms[i]
-    height <- min(0.5, atom_count / 10 * 0.5)  # Cap at 0.5 for visualization
-    
-    # Determine color based on atom count category
-    color_idx <- min(5, ceiling(atom_count / 2))
-    if (color_idx < 1) color_idx <- 1
-    
-    fig <- fig %>% add_trace(
-      x = coords[,1], 
-      y = coords[,2],
-      z = rep(height, nrow(coords)),
-      type = "scatter3d",
-      mode = "lines",
-      line = list(
-        color = atom_colors[color_idx],
-        width = 2
-      ),
-      hoverinfo = "text",
-      hovertext = paste("County:", county_data$name[i], 
-                        "<br>Atoms:", atom_count),
-      showlegend = FALSE
-    )
+    if(nrow(coords) > 0) {
+      # Calculate height based on atom count (assuming num_atoms exists)
+      # If it doesn't exist, use a default height of 0.1
+      atom_count <- if("num_atoms" %in% names(county_data)) county_data$num_atoms[i] else 1
+      height <- min(0.5, atom_count / 10 * 0.5)  # Cap at 0.5 for visualization
+      if(is.na(height)) height <- 0.1
+      
+      # Determine color based on atom count category
+      color_idx <- min(5, ceiling(atom_count / 2))
+      if(is.na(color_idx) || color_idx < 1) color_idx <- 1
+      
+      fig <- fig %>% add_trace(
+        x = coords[,1], 
+        y = coords[,2],
+        z = rep(height, nrow(coords)),
+        type = "scatter3d",
+        mode = "lines",
+        line = list(
+          color = atom_colors[color_idx],
+          width = 2
+        ),
+        hoverinfo = "text",
+        hovertext = paste("County:", county_data$NAME[i], 
+                          "<br>Atoms:", atom_count),
+        showlegend = FALSE
+      )
+    }
   }
   
   # Add state boundaries for context
@@ -572,32 +525,34 @@ generate_3d_atom_map <- function(state_filter = NULL, detail_level = 0.01) {
     state_geom <- stbounds[i,]
     coords <- st_coordinates(state_geom)[,1:2]
     
-    fig <- fig %>% add_trace(
-      x = coords[,1], 
-      y = coords[,2],
-      z = rep(0, nrow(coords)),  # Base level for states
-      type = "scatter3d",
-      mode = "lines",
-      line = list(
-        color = "black",
-        width = 2
-      ),
-      hoverinfo = "text",
-      hovertext = paste("State:", stbounds$name[i]),
-      showlegend = FALSE
-    )
+    if(nrow(coords) > 0) {
+      fig <- fig %>% add_trace(
+        x = coords[,1], 
+        y = coords[,2],
+        z = rep(0, nrow(coords)),  # Base level for states
+        type = "scatter3d",
+        mode = "lines",
+        line = list(
+          color = "black",
+          width = 2
+        ),
+        hoverinfo = "text",
+        hovertext = paste("State:", stbounds$NAME[i]),
+        showlegend = FALSE
+      )
+    }
   }
   
-  # Configure the 3D scene with fixed camera
+  # Configure the 3D scene
   fig <- fig %>% layout(
     title = "3D Map of Atom Counts by County",
     scene = list(
       aspectmode = "data",
       camera = list(
-        eye = list(x = 0, y = -0.1, z = 2),  # Camera positioned above the map
+        eye = list(x = 0, y = -0.1, z = 2),
         center = list(x = 0, y = 0, z = 0)
       ),
-      dragmode = "pan",  # Allow panning but not rotation
+      dragmode = "pan",
       xaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
       yaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
       zaxis = list(title = "Atom Count", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE, range = c(0, 0.6))
@@ -606,4 +561,46 @@ generate_3d_atom_map <- function(state_filter = NULL, detail_level = 0.01) {
   
   return(fig)
 }
+
+# Function to create forest plots for method comparison
+create_forest_plot <- function(data, x_corr = 0.2, y_corr = 0.2) {
+  # Add correlation values to the combined results
+  plot_data <- data %>%
+    filter(x_correlation == x_corr, y_correlation == y_corr) %>%
+    group_by(method, variable, x_correlation, y_correlation) %>%
+    summarize(
+      mean_estimate = mean(estimated_beta),
+      mean_lower = mean(ci_lower),
+      mean_upper = mean(ci_upper),
+      true_value = mean(true_beta), 
+      mean_bias = mean(bias),
+      mean_rel_bias = mean(relative_bias),
+      coverage_rate = mean(within_ci) * 100,
+      .groups = 'drop'
+    )
+  
+  # Reorder the variable levels
+  plot_data$variable <- factor(plot_data$variable, 
+                               levels = c("covariate_x_1", "covariate_x_2", "covariate_x_3", 
+                                          "covariate_y_1", "covariate_y_2", "covariate_y_3", "covariate_y_4"))
+  
+  # Create the forest plot
+  ggplot(plot_data, aes(x = mean_estimate, y = variable, color = method)) +
+    geom_point(size = 3) +
+    geom_errorbarh(aes(xmin = mean_lower, xmax = mean_upper), height = 0.2) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_point(aes(x = true_value), shape = 4, size = 3, color = "black") +
+    scale_color_manual(values = c("ABRM" = "#F08080", "Dasymetric" = "#20B2AA")) +
+    labs(
+      x = "Coefficient Value", 
+      y = "") +
+    theme_minimal() +
+    theme(
+      panel.grid.major = element_line(color = "lightgray"),
+      panel.grid.minor = element_blank(),
+      legend.title = element_blank(),
+      legend.position = "top"
+    )
+}
+
 

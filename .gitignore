@@ -1,1 +1,24 @@
+# macOS system files
 .DS_Store
+*/.DS_Store
+**/.DS_Store
+
+# Data directory to exclude
+data_preprocessing/data/
+
+# R specific files
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# ShinyApps deployment files
+rsconnect/
+
+# Large data files
+*.rds
+# Uncomment if you want to exclude RData files
+# *.RData
+
+# Log files
+*.log
