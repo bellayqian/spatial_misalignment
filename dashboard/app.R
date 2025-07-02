@@ -150,9 +150,9 @@ ui <- dashboardPage(
                   tabPanel("Poisson Distribution - Count data", 
                            plotOutput("poisson_forest_plot", height = "600px")),
                   tabPanel("Binomial Distribution - Rate data", 
-                           p("Binomial distribution comparison results will be available soon.")),
+                           plotOutput("binomial_forest_plot", height = "600px")),
                   tabPanel("Normal Distribution - Continuous data", 
-                           p("Normal distribution comparison results will be available soon."))
+                           plotOutput("normal_forest_plot", height = "600px"))
                 )
               )
       ),
@@ -172,7 +172,27 @@ ui <- dashboardPage(
                   p("Atom-based regression models (ABRM) offer a promising alternative by using atoms, the intersecting areas of all relevant units, as the fundamental units of analysis. By preserving the original spatial resolution of the data, ABRM account for uncertainty in statistical relationships while offering a robust method for handling misaligned data."),
                   
                   h3("Project Goal"),
-                  p("To address these challenges, our work focuses on creating a comprehensive computational framework for ABRM, including developing open-source tools in R, to make ABRM more accessible to government agencies, health institutions, academic public health researchers, policy makers, and community-based organizations that produce, analyze, and/or use data from spatially misaligned geographic areas to inform their work for health equity.")
+                  p("To address these challenges, our work focuses on creating a comprehensive computational framework for ABRM, including developing open-source tools in R, to make ABRM more accessible to government agencies, health institutions, academic public health researchers, policy makers, and community-based organizations that produce, analyze, and/or use data from spatially misaligned geographic areas to inform their work for health equity."),
+                  
+                  h3("Funding and Project Information"),
+                  p("This work was funded by the Robert Wood Johnson Foundation, Grant 81746. Project details are provided below."),
+                  
+                  h4("Project Title:"),
+                  p("Aligning spatially misaligned data for health equity analysis, action, and accountability"),
+                  
+                  h4("Principal Investigators:"),
+                  p("Dr. Nancy Krieger (PI) and Dr. Rachel Nethery (co-PI)"),
+                  
+                  h4("Start date:"),
+                  p("July 2024"),
+                  
+                  h4("Project team and collaborators:"),
+                  tags$ul(
+                    tags$li("Yunzhe Qian (Bella), MS (Research Assistant, Dept of Biostatistics, HSPH)"),
+                    tags$li("Rachel Nethery, PhD (Assistant Professor, Dept of Biostatistics, HSPH)"),
+                    tags$li("Nancy Krieger, PhD (Professor, Department of Social and Behavioral Sciences (SBS))"),
+                    tags$li("Nykesha Johnson, MPH (Statistical Data Analyst/Data Manager, SBS, HSPH)")
+                  )
                 )
               )
       )
@@ -607,10 +627,20 @@ server <- function(input, output, session) {
   })
   
   # Forest plot for Poisson distribution comparison
-  poisson_data <- read.csv("data/sensitivity_analysis_results.csv")
+  poisson_data <- read.csv("data/poisson_sensitivity_analysis_results.csv")
+  binomial_data <- read.csv("data/binomial_sensitivity_analysis_results.csv")
+  normal_data <- read.csv("data/normal_sensitivity_analysis_results.csv")
+  
   output$poisson_forest_plot <- renderPlot({
-    create_forest_plot(poisson_data, 0.2, 0.6)
+    create_poisson_forest_plot(poisson_data, 0.2, 0.6)
   })
+  output$binomial_forest_plot <- renderPlot({
+    create_binomial_forest_plot(binomial_data, 0.2, 0.6)
+  })
+  output$normal_forest_plot <- renderPlot({
+    create_normal_forest_plot(normal_data, 0.2, 0.6)
+  })
+  
 }
 
 # Run the application

@@ -563,7 +563,7 @@ generate_3d_atom_map <- function(state_filter = NULL, detail_level = 0.01) {
 }
 
 # Function to create forest plots for method comparison
-create_forest_plot <- function(data, x_corr = 0.2, y_corr = 0.2) {
+create_poisson_forest_plot <- function(data, x_corr = 0.2, y_corr = 0.2) {
   # Add correlation values to the combined results
   plot_data <- data %>%
     filter(x_correlation == x_corr, y_correlation == y_corr) %>%
@@ -603,4 +603,87 @@ create_forest_plot <- function(data, x_corr = 0.2, y_corr = 0.2) {
     )
 }
 
+# Function to create forest plots for binomial distribution comparison
+create_binomial_forest_plot <- function(data, x_corr = 0.2, y_corr = 0.2) {
+  # Add correlation values to the combined results
+  plot_data <- data %>%
+    filter(x_correlation == x_corr, y_correlation == y_corr) %>%
+    group_by(method, variable, x_correlation, y_correlation) %>%
+    summarize(
+      mean_estimate = mean(estimated_beta),
+      mean_lower = mean(ci_lower),
+      mean_upper = mean(ci_upper),
+      true_value = mean(true_beta), 
+      mean_bias = mean(bias),
+      mean_rel_bias = mean(relative_bias),
+      coverage_rate = mean(within_ci) * 100,
+      .groups = 'drop'
+    )
+  
+  # Reorder the variable levels (adjust based on your binomial data structure)
+  plot_data$variable <- factor(plot_data$variable, 
+                               levels = c("covariate_x_1_prop", "covariate_x_2_prop", "covariate_x_3_prop", 
+                                          "covariate_y_1_prop", "covariate_y_2_prop", "covariate_y_3_prop", "covariate_y_4_prop"))
+  
+  # Create the forest plot
+  ggplot(plot_data, aes(x = mean_estimate, y = variable, color = method)) +
+    geom_point(size = 3) +
+    geom_errorbarh(aes(xmin = mean_lower, xmax = mean_upper), height = 0.2) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_point(aes(x = true_value), shape = 4, size = 3, color = "black") +
+    scale_color_manual(values = c("ABRM_Binomial" = "#F08080", "Dasymetric_Binomial" = "#20B2AA")) +
+    labs(
+      x = "Coefficient Value", 
+      y = "",
+      title = "Binomial Distribution: ABRM vs Dasymetric Mapping") +
+    theme_minimal() +
+    theme(
+      panel.grid.major = element_line(color = "lightgray"),
+      panel.grid.minor = element_blank(),
+      legend.title = element_blank(),
+      legend.position = "top"
+    )
+}
+
+# Function to create forest plots for normal distribution comparison
+create_normal_forest_plot <- function(data, x_corr = 0.2, y_corr = 0.2) {
+  # Add correlation values to the combined results
+  plot_data <- data %>%
+    filter(x_correlation == x_corr, y_correlation == y_corr) %>%
+    group_by(method, variable, x_correlation, y_correlation) %>%
+    summarize(
+      mean_estimate = mean(estimated_beta),
+      mean_lower = mean(ci_lower),
+      mean_upper = mean(ci_upper),
+      true_value = mean(true_beta), 
+      mean_bias = mean(bias),
+      mean_rel_bias = mean(relative_bias),
+      coverage_rate = mean(within_ci) * 100,
+      .groups = 'drop'
+    )
+  
+  # Reorder the variable levels (adjust based on your normal data structure)
+  plot_data$variable <- factor(plot_data$variable, 
+                               levels = c("covariate_x_1", "covariate_x_2", "covariate_x_3", 
+                                          "covariate_y_1", "covariate_y_2", "covariate_y_3", "covariate_y_4"))
+  
+  # Create the forest plot
+  ggplot(plot_data, aes(x = mean_estimate, y = variable, color = method)) +
+    geom_point(size = 3) +
+    geom_errorbarh(aes(xmin = mean_lower, xmax = mean_upper), height = 0.2) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    geom_point(aes(x = true_value), shape = 4, size = 3, color = "black") +
+    scale_color_manual(values = c("ABRM_Normal" = "#F08080", "Dasymetric_Normal" = "#20B2AA")) +
+    labs(
+      x = "Coefficient Value", 
+      y = "",
+      title = "Normal Distribution: ABRM vs Dasymetric Mapping") +
+    theme_minimal() +
+    theme(
+      panel.grid.major = element_line(color = "lightgray"),
+      panel.grid.minor = element_blank(),
+      legend.title = element_blank(),
+      legend.position = "top"
+    )
+}
 

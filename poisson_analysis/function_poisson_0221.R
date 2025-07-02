@@ -527,7 +527,7 @@ prepare_nimble_inputs <- function(bookkeeping, adjacency, data) {
 # Function to run NIMBLE model
 run_nimble_model <- function(constants, data, inits, sim_metadata, niter = 30000, 
                              nburnin = 5000, nchains = 3, save_plots = TRUE, output_dir = NULL) {
-  source('nimble_abrm_0219.R')
+  source('nimble_abrm_poisson_0219.R')
   
   Rmodel <- nimbleModel(abrm, constants, data, inits, calculate = FALSE)
   compmod <- compileNimble(Rmodel)
