@@ -16,7 +16,9 @@ The dashboard allows you to explore:
 
 ## Repository Structure
 
-- **poisson_analysis**: R scripts for statistical analysis comparing ABRM with dasymetric mapping
+- **poisson_analysis**: R scripts for statistical analysis comparing ABRM with dasymetric mapping for count data (assumes Poisson distribution)
+- **binomial_analysis**: R scripts for statistical analysis comparing ABRM with dasymetric mapping for proportion data (assumes binomial distribution)
+- **normal_analysis**: R scripts for statistical analysis comparing ABRM with dasymetric mapping for continuous data (assumes normal distribution)
 - **dashboard**: Interactive Shiny dashboard for visualizing counties, congressional districts, and atoms
 - **data_preprocessing**: Scripts for preparing and preprocessing data
 
